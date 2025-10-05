@@ -78,13 +78,14 @@ def process_page_worker(page_index, pdf_path, language):
                 except Exception:
                     pass
         
-doc.close()
+        doc.close()
         print(f"  <- Finished page {page_num}")
         return {
             "page_num": page_num,
             "text_html": translated_page_html,
             "image_html": page_images_html,
         }
+
     except Exception as e:
         print(f"  !! Critical error while processing page {page_num}: {e}")
         return {
