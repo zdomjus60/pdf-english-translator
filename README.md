@@ -51,3 +51,24 @@ python3 translator.py "my-document.pdf" "traduzione_it.html"
 ```bash
 python3 translator.py "my-document.pdf" "translation_en.html" --lang en
 ```
+
+## Supported Languages
+
+The script can translate to any language supported by Google Translate. The target language is specified with the `--lang` option, followed by an ISO 639-1 language code.
+
+Here is a list of common languages:
+
+| Language | Code |
+|----------|------|
+| English  | `en` |
+| Italian  | `it` |
+| French   | `fr` |
+| Spanish  | `es` |
+| German   | `de` |
+| Portuguese| `pt` |
+| Russian  | `ru` |
+| Chinese (Simp.)| `zh-cn` |
+| Japanese | `ja` |
+| Arabic   | `ar` |
+
+For a complete list of supported languages, please refer to the official [Google Cloud Translate documentation](https://cloud.google.com/translate/docs/languages).

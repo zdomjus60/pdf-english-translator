@@ -9,17 +9,57 @@ import concurrent.futures
 from functools import partial
 import argparse
 
+# --- UI Translations ---
+UI_STRINGS = {
+    'en': {
+        'lang_code': 'en',
+        'title': 'PDF Translation',
+        'h1_content': 'Translated Content',
+        'h1_images': 'Document Images',
+        'page_num_prefix': 'Page',
+        'img_caption_prefix': 'Image from page'
+    },
+    'it': {
+        'lang_code': 'it',
+        'title': 'Traduzione PDF',
+        'h1_content': 'Contenuto Tradotto',
+        'h1_images': 'Immagini del Documento',
+        'page_num_prefix': 'Pagina',
+        'img_caption_prefix': 'Immagine da pagina'
+    },
+    'fr': {
+        'lang_code': 'fr',
+        'title': 'Traduction PDF',
+        'h1_content': 'Contenu Traduit',
+        'h1_images': 'Images du Document',
+        'page_num_prefix': 'Page',
+        'img_caption_prefix': 'Image de la page'
+    },
+    'es': {
+        'lang_code': 'es',
+        'title': 'Traducción de PDF',
+        'h1_content': 'Contenido Traducido',
+        'h1_images': 'Imágenes del Documento',
+        'page_num_prefix': 'Página',
+        'img_caption_prefix': 'Imagen de la página'
+    },
+    'de': {
+        'lang_code': 'de',
+        'title': 'PDF-Übersetzung',
+        'h1_content': 'Übersetzter Inhalt',
+        'h1_images': 'Dokumentbilder',
+        'page_num_prefix': 'Seite',
+        'img_caption_prefix': 'Bild von Seite'
+    }
+}
+
 # --- Worker Function for Parallel Processing ---
 def process_page_worker(page_index, pdf_path, language):
-    """
-    Processes a single page of a PDF: extracts and translates text, and extracts images.
-    This function is designed to be called by a thread pool executor.
-    """
     page_num = page_index + 1
     print(f"  -> Starting page {page_num}")
+    ui = UI_STRINGS.get(language, UI_STRINGS['en'])
 
     try:
-        # Each thread gets its own file handle and translator instance for thread safety
         translator = GoogleTranslator(source='auto', target=language)
         doc = fitz.open(pdf_path)
         page = doc.load_page(page_index)
@@ -53,26 +93,20 @@ def process_page_worker(page_index, pdf_path, language):
                 try:
                     base_image = doc.extract_image(xref)
                     image_bytes = base_image["image"]
-                    
-                    # --- Start Filter ---
                     pil_img = Image.open(io.BytesIO(image_bytes))
                     if pil_img.width < 100 or pil_img.height < 100:
                         continue
-                    
                     page_width = page.rect.width
                     page_height = page.rect.height
                     if abs(pil_img.width - page_width) < 20 and abs(pil_img.height - page_height) < 20:
                         continue
-                    # --- End Filter ---
-
                     image_ext = base_image["ext"]
                     img_base64 = base64.b64encode(image_bytes).decode("utf-8")
                     content_type = f"image/{image_ext}"
-
                     page_images_html += f'''
                     <div class="image-container">
                         <img src="data:{content_type};base64,{img_base64}" />
-                        <div class="image-caption">Image from page {page_num} (Object {img_index+1})</div>
+                        <div class="image-caption">{ui["img_caption_prefix"]} {page_num} (Object {img_index+1})</div>
                     </div>
                     '''
                 except Exception:
@@ -85,7 +119,6 @@ def process_page_worker(page_index, pdf_path, language):
             "text_html": translated_page_html,
             "image_html": page_images_html,
         }
-
     except Exception as e:
         print(f"  !! Critical error while processing page {page_num}: {e}")
         return {
@@ -94,147 +127,82 @@ def process_page_worker(page_index, pdf_path, language):
             "image_html": "",
         }
 
-
 def translate_pdf_to_html(pdf_path, html_path, language='it'):
-    """
-    Translates a PDF, extracts images using PyMuPDF, and saves it as a styled HTML file.
-    Uses a thread pool to process pages in parallel.
-    """
-    html_template = '''
+    ui = UI_STRINGS.get(language, UI_STRINGS['en'])
+
+    html_template = f"""
     <!DOCTYPE html>
-    <html lang="en">
+    <html lang="{ui['lang_code']}">
     <head>
         <meta charset="UTF-8">
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <title>PDF Translation</title>
+        <title>{ui['title']}</title>
         <style>
-            body {{
-                font-family: serif;
-                line-height: 1.4;
-                max-width: 800px;
-                margin: 40px auto;
-                padding: 0 20px;
-                color: #333;
-            }}
-            h1 {{
-                text-align: center;
-                border-bottom: 2px solid #eee;
-                padding-bottom: 20px;
-                margin-bottom: 40px;
-            }}
-            .page-container {{
-                border-bottom: 2px solid #ccc;
-                padding-bottom: 30px;
-                margin-bottom: 50px;
-            }}
-            .page-content p {{
-                margin-bottom: 0.8em;
-                text-align: justify;
-            }}
-            .page-number {{
-                text-align: right;
-                font-size: 0.9em;
-                color: #999;
-                border-top: 1px solid #eee;
-                padding-top: 10px;
-                margin-top: 30px;
-            }}
-            .all-images-container {{
-                /* This container is just a wrapper */
-            }}
-            .image-container {{
-                display: block; /* Each image on its own line */
-                margin: 30px auto; /* Center the block and add vertical space */
-                padding: 5px;
-                border: 1px solid #ddd;
-                max-width: 95%; /* A bit wider is fine if it's centered */
-                box-sizing: border-box; /* Includes padding/border in the width */
-            }}
-            .image-container img {{
-                display: block;
-                margin: 0 auto;
-                max-width: 100%;
-                height: auto;
-                max-height: 80vh;
-            }}
-            .image-caption {{
-                font-size: 0.9em;
-                color: #555;
-                margin-top: 10px;
-                text-align: center; /* Center the caption text */
-            }}
+            body {{ font-family: serif; line-height: 1.4; max-width: 800px; margin: 40px auto; padding: 0 20px; color: #333; }}
+            h1 {{ text-align: center; border-bottom: 2px solid #eee; padding-bottom: 20px; margin-bottom: 40px; }}
+            .page-container {{ border-bottom: 2px solid #ccc; padding-bottom: 30px; margin-bottom: 50px; }}
+            .page-content p {{ margin-bottom: 0.8em; text-align: justify; }}
+            .page-number {{ text-align: right; font-size: 0.9em; color: #999; border-top: 1px solid #eee; padding-top: 10px; margin-top: 30px; }}
+            .image-container {{ display: block; margin: 30px auto; padding: 5px; border: 1px solid #ddd; max-width: 95%; box-sizing: border-box; }}
+            .image-container img {{ display: block; margin: 0 auto; max-width: 100%; height: auto; max-height: 80vh; }}
+            .image-caption {{ font-size: 0.9em; color: #555; margin-top: 10px; text-align: center; }}
         </style>
     </head>
     <body>
-        <h1>Translated Content</h1>
+        <h1>{ui['h1_content']}</h1>
         {all_pages_content}
-
         <hr style="margin: 60px 0;">
-        <h1>Document Images</h1>
+        <h1>{ui['h1_images']}</h1>
         <div class="all-images-container">
             {all_images_content}
         </div>
     </body>
     </html>
-    '''
+    """
 
     try:
         doc = fitz.open(pdf_path)
         num_pages = len(doc)
         doc.close()
-
         print(f"Found {num_pages} pages. Starting parallel processing for language '{language}'...")
-
         worker = partial(process_page_worker, pdf_path=pdf_path, language=language)
         page_indices = range(num_pages)
-        
         all_results = []
         with concurrent.futures.ThreadPoolExecutor() as executor:
             all_results = list(executor.map(worker, page_indices))
-
         print("Parallel processing complete. Assembling HTML file...")
-
         all_results.sort(key=lambda r: r['page_num'])
-
         all_pages_html_content = ""
         all_images_html_content = ""
         for result in all_results:
             page_num = result["page_num"]
             translated_page_html = result["text_html"]
             page_images_html = result["image_html"]
-
             all_pages_html_content += f'''
             <div class="page-container">
                 <div class="page-content">
                     {translated_page_html}
                 </div>
-                <div class="page-number">Page {page_num}</div>
+                <div class="page-number">{ui["page_num_prefix"]} {page_num}</div>
             </div>
             '''
             all_images_html_content += page_images_html
-
         final_html = html_template.format(
             all_pages_content=all_pages_html_content,
             all_images_content=all_images_html_content
         )
-
         with open(html_path, 'w', encoding='utf-8') as file:
             file.write(final_html)
-
         print(f"Translation complete! File saved to: {html_path}")
-
     except FileNotFoundError:
         print(f"Error: File '{pdf_path}' not found.")
     except Exception as e:
         print(f"An unexpected error occurred: {e}")
-
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='Translate a PDF file to a styled HTML document.')
     parser.add_argument('input_pdf', type=str, help='The path to the input PDF file.')
     parser.add_argument('output_html', type=str, help='The path for the output HTML file.')
     parser.add_argument('--lang', type=str, default='it', help='The target language for translation (e.g., "en", "fr", "es"). Defaults to "it" (Italian).')
-    
     args = parser.parse_args()
-    
     translate_pdf_to_html(args.input_pdf, args.output_html, args.lang)
