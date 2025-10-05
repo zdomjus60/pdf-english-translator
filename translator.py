@@ -7,19 +7,20 @@ import io
 import fitz  # PyMuPDF
 import concurrent.futures
 from functools import partial
+import argparse
 
 # --- Worker Function for Parallel Processing ---
-def process_page_worker(page_index, pdf_path):
+def process_page_worker(page_index, pdf_path, language):
     """
     Processes a single page of a PDF: extracts and translates text, and extracts images.
     This function is designed to be called by a thread pool executor.
     """
     page_num = page_index + 1
-    print(f"  -> Inizio elaborazione pagina {page_num}")
+    print(f"  -> Starting page {page_num}")
 
     try:
         # Each thread gets its own file handle and translator instance for thread safety
-        translator = GoogleTranslator(source='auto', target='it')
+        translator = GoogleTranslator(source='auto', target=language)
         doc = fitz.open(pdf_path)
         page = doc.load_page(page_index)
 
@@ -35,12 +36,12 @@ def process_page_worker(page_index, pdf_path):
                     translated_batch = translator.translate_batch(paragraphs)
                     translated_paragraphs = [f"<p>{p}</p>" for p in translated_batch if p]
                 except Exception as e:
-                    print(f"    [Pagina {page_num}] Errore traduzione batch. Tento con paragrafi singoli. Errore: {e}")
+                    print(f"    [Page {page_num}] Batch translation error. Trying single paragraphs. Error: {e}")
                     for p in paragraphs:
                         try:
                             translated_paragraphs.append(f"<p>{translator.translate(p)}</p>")
                         except Exception as trans_error:
-                            print(f"      [Pagina {page_num}] Impossibile tradurre paragrafo: {p[:30]}... Errore: {trans_error}")
+                            print(f"      [Page {page_num}] Could not translate paragraph: {p[:30]}... Error: {trans_error}")
             translated_page_html = "\n".join(translated_paragraphs)
 
         # --- Image Extraction ---
@@ -54,19 +55,13 @@ def process_page_worker(page_index, pdf_path):
                     image_bytes = base_image["image"]
                     
                     # --- Start Filter ---
-                    # Load image into PIL to get dimensions
                     pil_img = Image.open(io.BytesIO(image_bytes))
-                    
-                    # Filter 1: Small images
                     if pil_img.width < 100 or pil_img.height < 100:
-                        print(f"      - Immagine {img_index+1} ignorata (troppo piccola).")
                         continue
-
-                    # Filter 2: Full-page images
+                    
                     page_width = page.rect.width
                     page_height = page.rect.height
                     if abs(pil_img.width - page_width) < 20 and abs(pil_img.height - page_height) < 20:
-                        print(f"      - Immagine {img_index+1} ignorata (dimensioni quasi identiche alla pagina).")
                         continue
                     # --- End Filter ---
 
@@ -77,41 +72,40 @@ def process_page_worker(page_index, pdf_path):
                     page_images_html += f'''
                     <div class="image-container">
                         <img src="data:{content_type};base64,{img_base64}" />
-                        <div class="image-caption">Immagine da pagina {page_num} (Oggetto {img_index+1})</div>
+                        <div class="image-caption">Image from page {page_num} (Object {img_index+1})</div>
                     </div>
                     '''
                 except Exception:
-                    # Ignore errors on single image extraction
                     pass
         
-        doc.close()
-        print(f"  <- Fine elaborazione pagina {page_num}")
+doc.close()
+        print(f"  <- Finished page {page_num}")
         return {
             "page_num": page_num,
             "text_html": translated_page_html,
             "image_html": page_images_html,
         }
     except Exception as e:
-        print(f"  !! Errore critico durante l'elaborazione della pagina {page_num}: {e}")
+        print(f"  !! Critical error while processing page {page_num}: {e}")
         return {
             "page_num": page_num,
-            "text_html": f"<p>Errore nell'elaborazione della pagina {page_num}.</p>",
+            "text_html": f"<p>Error processing page {page_num}.</p>",
             "image_html": "",
         }
 
 
-def translate_pdf_to_html(pdf_path, html_path):
+def translate_pdf_to_html(pdf_path, html_path, language='it'):
     """
     Translates a PDF, extracts images using PyMuPDF, and saves it as a styled HTML file.
     Uses a thread pool to process pages in parallel.
     """
     html_template = '''
     <!DOCTYPE html>
-    <html lang="it">
+    <html lang="en">
     <head>
         <meta charset="UTF-8">
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <title>Traduzione PDF</title>
+        <title>PDF Translation</title>
         <style>
             body {{
                 font-family: serif;
@@ -160,7 +154,6 @@ def translate_pdf_to_html(pdf_path, html_path):
                 margin: 0 auto;
                 max-width: 100%;
                 height: auto;
-                /* New rule to adapt very tall images to the screen */
                 max-height: 80vh;
             }}
             .image-caption {{
@@ -172,11 +165,11 @@ def translate_pdf_to_html(pdf_path, html_path):
         </style>
     </head>
     <body>
-        <h1>Contenuto Tradotto</h1>
+        <h1>Translated Content</h1>
         {all_pages_content}
 
         <hr style="margin: 60px 0;">
-        <h1>Immagini del Documento</h1>
+        <h1>Document Images</h1>
         <div class="all-images-container">
             {all_images_content}
         </div>
@@ -185,25 +178,21 @@ def translate_pdf_to_html(pdf_path, html_path):
     '''
 
     try:
-        # Open the doc once to get page count
         doc = fitz.open(pdf_path)
         num_pages = len(doc)
         doc.close()
 
-        print(f"Trovate {num_pages} pagine. Avvio l'elaborazione parallela...")
+        print(f"Found {num_pages} pages. Starting parallel processing for language '{language}'...")
 
-        # Use a partial function to pass the static pdf_path to the worker
-        worker = partial(process_page_worker, pdf_path=pdf_path)
+        worker = partial(process_page_worker, pdf_path=pdf_path, language=language)
         page_indices = range(num_pages)
         
         all_results = []
         with concurrent.futures.ThreadPoolExecutor() as executor:
-            # map processes the pages and returns results in order
             all_results = list(executor.map(worker, page_indices))
 
-        print("Elaborazione parallela completata. Assemblo il file HTML...")
+        print("Parallel processing complete. Assembling HTML file...")
 
-        # Although map preserves order, sorting is a good safety measure
         all_results.sort(key=lambda r: r['page_num'])
 
         all_pages_html_content = ""
@@ -218,12 +207,11 @@ def translate_pdf_to_html(pdf_path, html_path):
                 <div class="page-content">
                     {translated_page_html}
                 </div>
-                <div class="page-number">Pagina {page_num}</div>
+                <div class="page-number">Page {page_num}</div>
             </div>
             '''
             all_images_html_content += page_images_html
 
-        # --- Assemble Final HTML ---
         final_html = html_template.format(
             all_pages_content=all_pages_html_content,
             all_images_content=all_images_html_content
@@ -232,18 +220,20 @@ def translate_pdf_to_html(pdf_path, html_path):
         with open(html_path, 'w', encoding='utf-8') as file:
             file.write(final_html)
 
-        print(f"Traduzione completata! Il file è stato salvato in: {html_path}")
+        print(f"Translation complete! File saved to: {html_path}")
 
     except FileNotFoundError:
-        print(f"Errore: Il file '{pdf_path}' non è stato trovato.")
+        print(f"Error: File '{pdf_path}' not found.")
     except Exception as e:
-        print(f"Si è verificato un errore imprevisto: {e}")
+        print(f"An unexpected error occurred: {e}")
 
 
 if __name__ == "__main__":
-    if len(sys.argv) != 3:
-        print("Usage: python translator.py <input.pdf> <output.html>")
-    else:
-        input_pdf = sys.argv[1]
-        output_html = sys.argv[2]
-        translate_pdf_to_html(input_pdf, output_html)
+    parser = argparse.ArgumentParser(description='Translate a PDF file to a styled HTML document.')
+    parser.add_argument('input_pdf', type=str, help='The path to the input PDF file.')
+    parser.add_argument('output_html', type=str, help='The path for the output HTML file.')
+    parser.add_argument('--lang', type=str, default='it', help='The target language for translation (e.g., "en", "fr", "es"). Defaults to "it" (Italian).')
+    
+    args = parser.parse_args()
+    
+    translate_pdf_to_html(args.input_pdf, args.output_html, args.lang)

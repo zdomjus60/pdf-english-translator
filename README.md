@@ -5,9 +5,9 @@ A Python script to translate the text content of a PDF file and render it as an 
 ## Features
 
 - Extracts text and images from a PDF file.
-- Translates text to a specified language (default: Italian) using Google Translate.
+- Translates text to a user-specified language (defaults to Italian) using Google Translate.
 - Processes pages in parallel for improved speed (multithreading).
-- Intelligently filters out full-page scans from the image gallery.
+- Intelligently filters out full-page scans and small decorative images.
 - Renders the output as a clean, readable HTML file with the translated text first, followed by a gallery of extracted images.
 
 ## Dependencies
@@ -28,13 +28,26 @@ pip install deep-translator PyMuPDF Pillow
 Run the script from your terminal:
 
 ```bash
-python3 translator.py <input.pdf> <output.html>
+python3 translator.py <input.pdf> <output.html> [options]
 ```
 
-- `<input.pdf>`: The path to the PDF file you want to translate.
-- `<output.html>`: The name of the HTML file to be created.
+### Arguments
 
-Example:
+-   `<input.pdf>`: (Required) The path to the PDF file you want to translate.
+-   `<output.html>`: (Required) The name of the HTML file to be created.
+
+### Options
+
+-   `--lang <language_code>`: (Optional) The target language for the translation (e.g., `en`, `fr`, `es`). Defaults to `it` (Italian) if not provided.
+
+### Examples
+
+**Translate to Italian (default):**
 ```bash
-python3 translator.py "my-document.pdf" "traduzione.html"
+python3 translator.py "my-document.pdf" "traduzione_it.html"
+```
+
+**Translate to English:**
+```bash
+python3 translator.py "my-document.pdf" "translation_en.html" --lang en
 ```
