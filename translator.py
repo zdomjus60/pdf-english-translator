@@ -39,7 +39,7 @@ UI_STRINGS = {
         'lang_code': 'es',
         'title': 'Traducción de PDF',
         'h1_content': 'Contenido Traducido',
-        'h1_images': 'Imágenes del Documento',
+        'h1_images': 'Immagini del Documento',
         'page_num_prefix': 'Página',
         'img_caption_prefix': 'Imagen de la página'
     },
@@ -94,12 +94,17 @@ def process_page_worker(page_index, pdf_path, language):
                     base_image = doc.extract_image(xref)
                     image_bytes = base_image["image"]
                     pil_img = Image.open(io.BytesIO(image_bytes))
+                    
+                    # Filter out small images (icons/logos)
                     if pil_img.width < 100 or pil_img.height < 100:
                         continue
+                    
+                    # Filter out full-page background images
                     page_width = page.rect.width
                     page_height = page.rect.height
                     if abs(pil_img.width - page_width) < 20 and abs(pil_img.height - page_height) < 20:
                         continue
+
                     image_ext = base_image["ext"]
                     img_base64 = base64.b64encode(image_bytes).decode("utf-8")
                     content_type = f"image/{image_ext}"
@@ -130,13 +135,14 @@ def process_page_worker(page_index, pdf_path, language):
 def translate_pdf_to_html(pdf_path, html_path, language='it'):
     ui = UI_STRINGS.get(language, UI_STRINGS['en'])
 
-    html_template = f"""
+    # Stringa normale (non f-string) con raddoppio delle graffe per il CSS {{ }}
+    html_template = """
     <!DOCTYPE html>
-    <html lang="{ui['lang_code']}">
+    <html lang="{lang_code}">
     <head>
         <meta charset="UTF-8">
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <title>{ui['title']}</title>
+        <title>{title}</title>
         <style>
             body {{ font-family: serif; line-height: 1.4; max-width: 800px; margin: 40px auto; padding: 0 20px; color: #333; }}
             h1 {{ text-align: center; border-bottom: 2px solid #eee; padding-bottom: 20px; margin-bottom: 40px; }}
@@ -149,10 +155,10 @@ def translate_pdf_to_html(pdf_path, html_path, language='it'):
         </style>
     </head>
     <body>
-        <h1>{ui['h1_content']}</h1>
+        <h1>{h1_content}</h1>
         {all_pages_content}
         <hr style="margin: 60px 0;">
-        <h1>{ui['h1_images']}</h1>
+        <h1>{h1_images}</h1>
         <div class="all-images-container">
             {all_images_content}
         </div>
@@ -164,20 +170,26 @@ def translate_pdf_to_html(pdf_path, html_path, language='it'):
         doc = fitz.open(pdf_path)
         num_pages = len(doc)
         doc.close()
+        
         print(f"Found {num_pages} pages. Starting parallel processing for language '{language}'...")
+        
         worker = partial(process_page_worker, pdf_path=pdf_path, language=language)
         page_indices = range(num_pages)
-        all_results = []
+        
         with concurrent.futures.ThreadPoolExecutor() as executor:
             all_results = list(executor.map(worker, page_indices))
+            
         print("Parallel processing complete. Assembling HTML file...")
         all_results.sort(key=lambda r: r['page_num'])
+        
         all_pages_html_content = ""
         all_images_html_content = ""
+        
         for result in all_results:
             page_num = result["page_num"]
             translated_page_html = result["text_html"]
             page_images_html = result["image_html"]
+            
             all_pages_html_content += f'''
             <div class="page-container">
                 <div class="page-content">
@@ -187,13 +199,22 @@ def translate_pdf_to_html(pdf_path, html_path, language='it'):
             </div>
             '''
             all_images_html_content += page_images_html
+
+        # Formattazione finale del template
         final_html = html_template.format(
+            lang_code=ui['lang_code'],
+            title=ui['title'],
+            h1_content=ui['h1_content'],
+            h1_images=ui['h1_images'],
             all_pages_content=all_pages_html_content,
             all_images_content=all_images_html_content
         )
+        
         with open(html_path, 'w', encoding='utf-8') as file:
             file.write(final_html)
+            
         print(f"Translation complete! File saved to: {html_path}")
+        
     except FileNotFoundError:
         print(f"Error: File '{pdf_path}' not found.")
     except Exception as e:
@@ -203,6 +224,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='Translate a PDF file to a styled HTML document.')
     parser.add_argument('input_pdf', type=str, help='The path to the input PDF file.')
     parser.add_argument('output_html', type=str, help='The path for the output HTML file.')
-    parser.add_argument('--lang', type=str, default='it', help='The target language for translation (e.g., "en", "fr", "es"). Defaults to "it" (Italian).')
+    parser.add_argument('--lang', type=str, default='it', help='The target language (default: it).')
+    
     args = parser.parse_args()
     translate_pdf_to_html(args.input_pdf, args.output_html, args.lang)
